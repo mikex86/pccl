@@ -1,6 +1,6 @@
 #include "pccl.h"
-#include <c++/12/numeric>
 #include <ccoip_master.hpp>
+#include <numeric>
 #include <optional>
 #include <pccl_log.hpp>
 #include <unordered_set>

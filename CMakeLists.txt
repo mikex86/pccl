@@ -93,8 +93,11 @@ endif ()
 if (PCCL_BUILD_CUDA_SUPPORT)
     set(CMAKE_CUDA_STANDARD 20)
 
-    # target sm_50 as a lower bound. We override this in a target specific way when necessary.
-    set(CMAKE_CUDA_ARCHITECTURES "50")
+    if (CMAKE_CUDA_ARCHITECTURES)
+        set(PCCL_CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+    else ()
+        set(PCCL_CUDA_ARCHITECTURES "50;52;53;60;61;62;70;72;75;80;86;87;89;90;90a")
+    endif ()
 
     # enable cuda language
     enable_language(CUDA)

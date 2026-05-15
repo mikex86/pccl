@@ -47,7 +47,7 @@ if (PCCL_BUILD_CUDA_SUPPORT)
             CUDA_SEPARABLE_COMPILATION OFF)
 
     set_target_properties(simplehash_cuda PROPERTIES
-            CUDA_ARCHITECTURES "50;52;53;60;61;62;70;72;75;80;86;87;89;90;90a"
+            CUDA_ARCHITECTURES "${PCCL_CUDA_ARCHITECTURES}"
     )
     target_link_libraries(simplehash_cuda PUBLIC CUDA::cuda_driver)
     target_link_libraries(ccoip_internal PRIVATE simplehash_cuda)
