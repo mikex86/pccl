@@ -845,10 +845,24 @@ ccoip::CCoIPClientHandler::EstablishP2PConnectionResult ccoip::CCoIPClientHandle
                     return peer.peer_uuid == peer_uuid;
                 }) == connection_info_packet.all_peers.end()) {
                 LOG(DEBUG) << "Closing p2p connection with peer " << uuid_to_string(it->first);
+                bool all_sockets_closed = true;
                 for (const auto &socket: it->second) {
                     if (!closeP2PConnection(it->first, *socket)) {
+                        all_sockets_closed = false;
                         LOG(WARN) << "Failed to close p2p tx connection with peer " << uuid_to_string(it->first);
                     }
+                }
+                if (!it->second.empty()) {
+                    // registerPeer() records one peer-level address entry after creating the whole connection pool, so
+                    // unregister exactly once after all pooled sockets for that peer have been closed.
+                    if (!client_state.unregisterPeer(it->second.front()->getConnectSockAddr())) [[unlikely]] {
+                        all_sockets_closed = false;
+                        LOG(ERR) << "Failed to unregister peer " << uuid_to_string(it->first)
+                                 << ". This means the client was already unregistered; This is a bug!";
+                    }
+                }
+                if (!all_sockets_closed) {
+                    LOG(WARN) << "Failed to fully close p2p tx connection pool with peer " << uuid_to_string(it->first);
                 }
                 it = p2p_connections_tx.erase(it);
             } else {
@@ -976,12 +990,6 @@ bool ccoip::CCoIPClientHandler::establishP2PConnections(const PeerInfo &peer) {
 bool ccoip::CCoIPClientHandler::closeP2PConnection(const ccoip_uuid_t &uuid, tinysockets::MultiplexedIOSocket &socket) {
     if (!socket.interrupt()) [[unlikely]] {
         LOG(BUG) << "Failed to close connection with peer " << uuid_to_string(uuid);
-        return false;
-    }
-
-    if (!client_state.unregisterPeer(socket.getConnectSockAddr())) [[unlikely]] {
-        LOG(ERR) << "Failed to unregister peer " << uuid_to_string(uuid)
-                 << ". This means the client was already unregistered; This is a bug!";
         return false;
     }
 

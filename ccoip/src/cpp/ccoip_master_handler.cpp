@@ -440,20 +440,22 @@ void ccoip::CCoIPMasterHandler::performTopologyOptimization(const uint32_t peer_
     if (task_it != topology_optimization_tasks.end()) {
         moonshot = true; // run moonshot optimization if this is the second time we are optimizing the topology
 
-        // if we have an ongoing optimization task, we join it first
+        // A previous optimization task may still be running when a peer rejoins and asks us to optimize again.
+        // Join and remove it before scheduling the next pass so a stale result cannot poison a later rejoin.
         task_it->second.join();
+        topology_optimization_tasks.erase(task_it);
     }
 
     // launch topology optimization task, if solution is not optimal
     if (!server_state.isTopologyOptimal(peer_group)) {
         {
             auto future = topology_optimization_threadpool.scheduleTask(
-                [this, peer_group] {
+                [this, peer_group, moonshot] {
                     std::vector<ccoip_uuid_t> new_topology{};
                     bool is_optimal = false;
                     bool has_improved = false;
                     if (!server_state.
-                        performTopologyOptimization(peer_group, false, new_topology, is_optimal, has_improved)) {
+                        performTopologyOptimization(peer_group, moonshot, new_topology, is_optimal, has_improved)) {
                         LOG(WARN) << "Failed to perform topology optimization!";
                         return;
                     }
@@ -461,8 +463,8 @@ void ccoip::CCoIPMasterHandler::performTopologyOptimization(const uint32_t peer_
                         return;
                     }
                     if (!server_state.setRingTopology(peer_group, new_topology, is_optimal)) {
-                        LOG(BUG) << "Failed to update topology. This means we tried to update a topology when it was "
-                                "already optimal. This is a bug!";
+                        LOG(DEBUG) << "Discarding stale topology optimization result for peer group " << peer_group
+                                << "; topology is already optimal.";
                     }
                 });
             topology_optimization_tasks.insert({peer_group, std::move(future)});
