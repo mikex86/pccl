@@ -69,4 +69,6 @@ target_include_directories(ccoip_public PUBLIC public_include)
 target_link_libraries(ccoip_private PRIVATE ccoip_internal)
 target_link_libraries(ccoip_public PRIVATE ccoip_internal)
 
-add_subdirectory(tests)
+if (PCCL_BUILD_TESTS)
+    add_subdirectory(tests)
+endif ()

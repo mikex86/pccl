@@ -16,4 +16,6 @@ target_link_libraries(tinysockets PRIVATE mpsc)
 target_link_libraries(tinysockets PRIVATE spsc)
 target_link_libraries(tinysockets PRIVATE lockfree_map)
 
-add_subdirectory(tests)
+if (PCCL_BUILD_TESTS)
+    add_subdirectory(tests)
+endif ()

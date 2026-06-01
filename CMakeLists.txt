@@ -33,6 +33,7 @@ endif ()
 # Handle CUDA build
 option(PCCL_BUILD_CUDA_SUPPORT "Build PCCL with CUDA support" ON)
 option(PCCL_BUILD_OPENMP_SUPPORT "Build PCCL with OpenMP support" ON)
+option(PCCL_BUILD_TESTS "Build PCCL tests" ON)
 
 if (PCCL_BUILD_CUDA_SUPPORT)
     find_package(CUDAToolkit)
@@ -106,10 +107,12 @@ endif ()
 # add third party libraries
 add_subdirectory(third_party)
 
-enable_testing()
+if (PCCL_BUILD_TESTS)
+    enable_testing()
 
-# include testing functions
-include(cmake/testing.cmake)
+    # include testing functions
+    include(cmake/testing.cmake)
+endif ()
 
 # add internal libraries
 add_subdirectory(common_utils)
@@ -145,4 +148,6 @@ if (NOT PCCL_BUILD_STATIC_LIB)
     fix_macos_abspaths(pccl)
 endif ()
 
-add_subdirectory(tests)
+if (PCCL_BUILD_TESTS)
+    add_subdirectory(tests)
+endif ()
