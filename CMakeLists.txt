@@ -104,6 +104,31 @@ if (PCCL_BUILD_CUDA_SUPPORT)
     enable_language(CUDA)
 endif ()
 
+# Handle HIP build
+option(PCCL_BUILD_HIP_SUPPORT "Build PCCL with HIP/ROCm support" OFF)
+
+if (PCCL_BUILD_HIP_SUPPORT)
+    if (CMAKE_VERSION VERSION_LESS 3.21)
+        message(WARNING "HIP language support requires CMake >= 3.21 (found ${CMAKE_VERSION}). HIP support disabled.")
+        set(PCCL_BUILD_HIP_SUPPORT OFF)
+    else()
+        find_package(hip QUIET)
+        if (hip_FOUND)
+            message(STATUS "HIP/ROCm was found!")
+            set(CMAKE_HIP_STANDARD 17)
+            if (CMAKE_HIP_ARCHITECTURES)
+                set(PCCL_HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}")
+            else ()
+                set(PCCL_HIP_ARCHITECTURES "gfx1100;gfx1101;gfx1200;gfx1201")
+            endif ()
+            enable_language(HIP)
+        else()
+            message(WARNING "HIP/ROCm not found! HIP support will be disabled!")
+            set(PCCL_BUILD_HIP_SUPPORT OFF)
+        endif()
+    endif()
+endif ()
+
 # add third party libraries
 add_subdirectory(third_party)
 
@@ -135,6 +160,10 @@ endif ()
 
 if (PCCL_BUILD_CUDA_SUPPORT)
     target_compile_definitions(pccl PRIVATE PCCL_HAS_CUDA_SUPPORT)
+endif ()
+
+if (PCCL_BUILD_HIP_SUPPORT)
+    target_compile_definitions(pccl PRIVATE PCCL_HAS_HIP_SUPPORT)
 endif ()
 
 target_include_directories(pccl PUBLIC include)

@@ -136,12 +136,15 @@ pip install pypccl
 - C++ compiler with C++20 support (MSVC 17+, gcc 12+ or clang 12+)
 - Python 3.12+ (if bindings are used)
 - NVIDIA CUDA Computing Toolkit v12+ (if building with CUDA support)
+- AMD ROCm 6.0+ with HIP (if building with HIP/AMD Radeon support); requires CMake 3.21+
 
 ## Supported Operating Systems
 
 - Windows
 - macOS
 - Linux
+
+> **Note:** HIP/ROCm support is Linux-only (Ubuntu 22.04/24.04 or RHEL 9.7/10.1). Windows and macOS are not supported by AMD ROCm.
 
 ## Supported architectures
 
@@ -157,6 +160,13 @@ NOTE: The default clang distribution of macOS does not support OpenMP! We recomm
 
 - x86_64
 - aarch64 (incl. Apple Silicon)
+
+### GPU support
+
+| Vendor | API | Architectures |
+|--------|-----|---------------|
+| NVIDIA | CUDA | Maxwell (sm_50) through Hopper (sm_90a) |
+| AMD | HIP/ROCm | RDNA2 (gfx1030), RDNA3 (gfx1100/1101), RDNA4 (gfx1200/1201) |
 
 ## Building
 
@@ -245,6 +255,34 @@ sudo apt install -y python3.12 python3.12-venv python3-pip
 The NVIDIA CUDA Computing Toolkit can be installed using any prevalent method as long as `nvcc` ends up in the system `PATH`
 of the shell that performs the cmake build.
 
+##### Installing ROCm/HIP (for AMD Radeon support)
+
+ROCm can be installed on Ubuntu using the AMD-provided apt repository. The following installs ROCm 6.x (adjust the version as needed):
+
+```bash
+# Add the ROCm apt repository
+sudo apt update && sudo apt install -y wget gnupg
+wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/rocm.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.4 $(lsb_release -cs) main" \
+    | sudo tee /etc/apt/sources.list.d/rocm.list
+
+# Install ROCm and HIP
+sudo apt update
+sudo apt install -y rocm-dev hip-dev
+
+# Add ROCm to PATH
+echo 'export PATH=$PATH:/opt/rocm/bin' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Verify the installation:
+```bash
+hipconfig --version
+rocminfo | grep gfx  # should list your GPU's gfx target (e.g. gfx1201 for Radeon 9700 AI Pro)
+```
+
+For other distributions or detailed instructions, refer to the [ROCm install guide](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/).
+
 ###### Install using nvidia provided apt repository
 This is the recommended way to install the CUDA toolkit on Ubuntu.
 If you do not have a good reason to deviate from this (such as custom drivers, as the p2p geohot driver), you should likely stick to this method.
@@ -291,6 +329,37 @@ cd build
 cmake -DCMAKE_BUILD_TYPE=Release -DPCCL_BUILD_CUDA_SUPPORT=ON .. # use -DPCCL_BUILD_CUDA_SUPPORT=OFF if building without cuda support
 cmake --build . --config Release --parallel
 ```
+
+To build with **AMD Radeon / HIP** support instead of (or alongside) CUDA, the configure and build steps must be run separately — `-D` flags are configure-time options and cannot be passed to `cmake --build`:
+
+```bash
+# Step 1 — configure (from your build directory)
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DPCCL_BUILD_CUDA_SUPPORT=OFF \
+      -DPCCL_BUILD_HIP_SUPPORT=ON \
+      -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
+      ..
+
+# Step 2 — build
+cmake --build . --config Release --parallel
+```
+
+If you have a stale build directory from a previous configure run, clear it first so the new flags take effect:
+
+```bash
+cd ~/Projects/pccl
+rm -rf build && mkdir build && cd build
+cmake -DCMAKE_BUILD_TYPE=Release \
+      -DPCCL_BUILD_CUDA_SUPPORT=OFF \
+      -DPCCL_BUILD_HIP_SUPPORT=ON \
+      -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
+      ..
+cmake --build . --config Release --parallel
+```
+
+Replace `gfx1201` with your GPU's gfx target (e.g. `gfx1100` for RX 7900 series, `gfx1200` for RX 9070). Run `rocminfo | grep gfx` to find your target. Both `PCCL_BUILD_CUDA_SUPPORT` and `PCCL_BUILD_HIP_SUPPORT` can be enabled simultaneously when both toolchains are present.
+
+> **Note:** HIP support is **opt-in** (`OFF` by default) and requires CMake 3.21 or higher and ROCm 6.0+.
 
 **CAUTION:** When building on Windows, make sure to use the "x64 Native Tools Command Prompt for VS 2022". Make sure it is specifically the 'x64' variant!
 

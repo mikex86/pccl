@@ -55,6 +55,7 @@ pcclDouble = 13
 typedef enum pcclDeviceType_t {
 pcclDeviceCpu = 0,
 pcclDeviceCuda = 1,
+pcclDeviceHip = 2,
 } pcclDeviceType_t;
 typedef enum pcclRedOp_t {
 pcclSum,
@@ -143,6 +144,7 @@ uint64_t rx_bytes;
 typedef struct pcclMasterInstanceState_t pcclMasterInstance_t;
 typedef struct pcclBuildInfo_t {
 bool has_cuda_support;
+bool has_hip_support;
 } pcclBuildInfo_t;
  pcclResult_t pcclInit(void);
  pcclResult_t pcclCreateCommunicator(const pcclCommCreateParams_t *params,

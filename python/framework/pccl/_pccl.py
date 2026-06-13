@@ -83,7 +83,8 @@ def __get_build_info() -> Dict[str, any]:
     build_info = ffi.new('pcclBuildInfo_t*')
     PCCLError.check(C.pcclGetBuildInfo(build_info), "pcclGetBuildInfo")
     return {
-        'has_cuda_support': build_info.has_cuda_support
+        'has_cuda_support': build_info.has_cuda_support,
+        'has_hip_support': build_info.has_hip_support
     }
 
 
@@ -213,6 +214,7 @@ class DataType(Enum):
 class DeviceType(Enum):
     CPU = C.pcclDeviceCpu
     CUDA = C.pcclDeviceCuda
+    HIP = C.pcclDeviceHip
 
     @classmethod
     def from_torch_device_type(cls, device_type: str):
@@ -220,6 +222,7 @@ class DeviceType(Enum):
         device_map = {
             'cpu': cls.CPU,
             'cuda': cls.CUDA,
+            'hip': cls.HIP,
         }
         return device_map.get(device_type, None)
 

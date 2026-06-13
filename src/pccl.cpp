@@ -157,6 +157,8 @@ static std::optional<ccoip::ccoip_device_type_t> getCCoIPDeviceType(const pcclDe
             return ccoip::ccoipDeviceCpu;
         case pcclDeviceCuda:
             return ccoip::ccoipDeviceCuda;
+        case pcclDeviceHip:
+            return ccoip::ccoipDeviceHip;
         default:
             return std::nullopt;
     }
@@ -601,6 +603,14 @@ pcclResult_t pcclSynchronizeSharedState(const pcclComm_t *communicator, pcclShar
         }
 #endif
 
+#ifndef PCCL_HAS_HIP_SUPPORT
+        if (*device_type == ccoip::ccoipDeviceHip) {
+            LOG(WARN) << "PCCL is not built with HIP support. Please use a hip-enabled distribution of PCCL to use "
+                         "hip tensors with PCCL!";
+            return pcclInvalidArgument;
+        }
+#endif
+
         shared_state_internal.entries.push_back(
                 ccoip_shared_state_entry_t{.key = entry.name,
                                            .data_type = *ccoip_data_type,
@@ -682,6 +692,11 @@ pcclResult_t pcclGetBuildInfo(pcclBuildInfo_t *info) {
     info->has_cuda_support = true;
 #else
     info->has_cuda_support = false;
+#endif
+#ifdef PCCL_HAS_HIP_SUPPORT
+    info->has_hip_support = true;
+#else
+    info->has_hip_support = false;
 #endif
     return pcclSuccess;
 }
