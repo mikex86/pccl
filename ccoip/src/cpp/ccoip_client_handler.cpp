@@ -5,6 +5,10 @@
 #include <pccl_log.hpp>
 #include "ccoip_types.hpp"
 
+#ifdef PCCL_HAS_HIP_SUPPORT
+#include <hip/hip_runtime.h>
+#endif
+
 #include <benchmark_runner.hpp>
 #include <guard_utils.hpp>
 #include <list>
