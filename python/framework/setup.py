@@ -56,6 +56,27 @@ class CMakeBuildExecutor(build_ext):
         if build_cuda_support_str is not None:
             build_cuda_support = (build_cuda_support_str == "ON")
 
+        # Detect HIP/ROCm support (check for rocm installation or hipcc)
+        def _detect_rocm() -> str | None:
+            for candidate in ['/opt/rocm', '/opt/rocm-7.2.4']:
+                hipcc = os.path.join(candidate, 'bin', 'hipcc')
+                if os.path.isfile(hipcc):
+                    return candidate
+            try:
+                result = subprocess.run(['hipcc', '--version'], capture_output=True, timeout=5)
+                if result.returncode == 0:
+                    return 'hipcc'
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+            return None
+
+        build_hip_support = False
+        build_hip_support_str = os.environ.get('PCCL_BUILD_HIP_SUPPORT', None)
+        if build_hip_support_str is not None:
+            build_hip_support = (build_hip_support_str == "ON")
+        else:
+            build_hip_support = _detect_rocm() is not None
+
         # Get C and CXX compiler
         c_compiler = os.environ.get('CC', None)
         cxx_compiler = os.environ.get('CXX', None)
@@ -66,8 +87,15 @@ class CMakeBuildExecutor(build_ext):
         cmake_args = [
             f'-DCMAKE_BUILD_TYPE={release_type}',  # Specify the build type
             f'-DPCCL_BUILD_CUDA_SUPPORT={build_cuda_support}', # Enable CUDA support depending on state
+            f'-DPCCL_BUILD_HIP_SUPPORT={build_hip_support}',   # Enable HIP/ROCm support when detected
             f'-DPCCL_BUILD_STATIC_LIB=OFF',  # Build shared libraries
         ]
+        # When building with HIP, point cmake at the versioned ROCm installation
+        # to avoid the system-installed (incompatible) HIP cmake config.
+        if build_hip_support:
+            rocm_root = _detect_rocm()
+            if rocm_root and rocm_root != 'hipcc':
+                cmake_args += [f'-DCMAKE_PREFIX_PATH={rocm_root}']
         if c_compiler is not None:
             cmake_args += [f'-DCMAKE_C_COMPILER={c_compiler}']
         if cxx_compiler is not None:

@@ -17,3 +17,9 @@ endif ()
 add_sanitized_gtest(simplehash_cpu_no_cuda_test simplehash_cpu_test_no_cuda.cpp)
 target_link_libraries(simplehash_cpu_no_cuda_test PRIVATE ccoip_private simplehash_cpu)
 
+if (PCCL_BUILD_HIP_SUPPORT)
+    add_unsanitized_gtest(simplehash_hip_test simplehash_hip_test.cpp)
+    target_link_libraries(simplehash_hip_test PRIVATE simplehash_hip)
+    target_link_libraries(simplehash_hip_test PRIVATE ccoip_private hip::host)
+endif ()
+

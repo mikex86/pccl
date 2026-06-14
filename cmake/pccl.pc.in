@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: pccl
+Description: Fault tolerant Collective Communications over IP
+Version: 0.1.0
+Libs: -L${libdir} -lpccl @_pccl_pc_libs@
+Cflags: -I${includedir}

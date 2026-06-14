@@ -4,7 +4,7 @@ add_library(ccoip_internal STATIC
         src/cpp/alloc.cpp src/cpp/guarded_alloc.cpp
         src/cpp/ccoip_packets.cpp src/cpp/ccoip_packet_buffer.cpp src/cpp/ccoip_client.cpp src/cpp/uuid_utils.cpp
         src/cpp/ccoip_master_state.cpp src/cpp/ccoip_client_state.cpp src/cpp/reduce_kernels.cpp src/cpp/reduce.cpp src/cpp/quantize.cpp
-        src/cpp/quantize_kernels.cpp src/cpp/simplehash/simplehash_cuda.cpp)
+        src/cpp/quantize_kernels.cpp src/cpp/simplehash/simplehash_cuda.cpp src/cpp/simplehash/simplehash_hip.cpp)
 
 add_library(crc32_cpu STATIC src/cpp/crc32/crc32_cpu.cpp)
 add_library(simplehash_cpu STATIC src/cpp/simplehash/simplehash_cpu.cpp)
@@ -51,6 +51,26 @@ if (PCCL_BUILD_CUDA_SUPPORT)
     )
     target_link_libraries(simplehash_cuda PUBLIC CUDA::cuda_driver)
     target_link_libraries(ccoip_internal PRIVATE simplehash_cuda)
+endif ()
+
+if (PCCL_BUILD_HIP_SUPPORT)
+    target_link_libraries(ccoip_internal PUBLIC hip::host)
+    target_compile_definitions(ccoip_internal PRIVATE PCCL_HAS_HIP_SUPPORT)
+    target_include_directories(ccoip_internal PRIVATE $<TARGET_PROPERTY:hip::host,INTERFACE_INCLUDE_DIRECTORIES>)
+    # OBJECT library (not STATIC) ensures the .hip.o is linked directly into every
+    # consuming target without going through archive extraction.  This guarantees
+    # the .init_array / __hipRegisterFatBinary constructor runs and the GPU fat
+    # binary is registered before the first kernel launch.
+    add_library(simplehash_hip OBJECT src/hip/simplehash_hip.hip)
+    set_target_properties(simplehash_hip PROPERTIES HIP_SEPARABLE_COMPILATION OFF)
+    set_target_properties(simplehash_hip PROPERTIES HIP_ARCHITECTURES "${PCCL_HIP_ARCHITECTURES}")
+    # -O2 causes the compiler to inline OCKL device-library functions so the
+    # resulting code object is self-contained and does not expose ockl_hostcall /
+    # ockl_fprintf symbols.  This prevents libamdhip64 from invoking
+    # amd_comgr_do_action(ADD_PRECOMPILED_HEADERS) for gfx1201 at kernel launch.
+    target_compile_options(simplehash_hip PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-O2>)
+    target_link_libraries(simplehash_hip PUBLIC hip::host)
+    target_link_libraries(ccoip_internal PRIVATE simplehash_hip)
 endif ()
 
 # add stub C++ language targets ccoip_private & ccoip_public

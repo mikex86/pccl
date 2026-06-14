@@ -104,6 +104,48 @@ if (PCCL_BUILD_CUDA_SUPPORT)
     enable_language(CUDA)
 endif ()
 
+# Handle HIP build
+option(PCCL_BUILD_HIP_SUPPORT "Build PCCL with HIP/ROCm support" OFF)
+
+if (PCCL_BUILD_HIP_SUPPORT)
+    if (CMAKE_VERSION VERSION_LESS 3.21)
+        message(WARNING "HIP language support requires CMake >= 3.21 (found ${CMAKE_VERSION}). HIP support disabled.")
+        set(PCCL_BUILD_HIP_SUPPORT OFF)
+    else()
+        # Prefer the versioned ROCm installation over any system-installed HIP package,
+        # which may reference renamed or incompatible library files.
+        if (NOT hip_DIR AND NOT HIP_DIR)
+            find_path(_rocm_root lib/cmake/hip/hip-config.cmake
+                PATHS /opt/rocm-7.2.4 /opt/rocm NO_DEFAULT_PATH)
+            if (_rocm_root)
+                list(PREPEND CMAKE_PREFIX_PATH "${_rocm_root}")
+            endif ()
+        endif ()
+        find_package(hip QUIET)
+        if (hip_FOUND)
+            message(STATUS "HIP/ROCm was found!")
+            set(CMAKE_HIP_STANDARD 17)
+            if (CMAKE_HIP_ARCHITECTURES)
+                set(PCCL_HIP_ARCHITECTURES "${CMAKE_HIP_ARCHITECTURES}")
+            else ()
+                set(PCCL_HIP_ARCHITECTURES "gfx1100;gfx1101;gfx1200;gfx1201")
+            endif ()
+            enable_language(HIP)
+        else()
+            message(WARNING "HIP/ROCm not found! HIP support will be disabled!")
+            set(PCCL_BUILD_HIP_SUPPORT OFF)
+        endif()
+    endif()
+endif ()
+
+option(PCCL_BUILD_STATIC_LIB "Build PCCL as a static library" ON)
+
+# When building a static pccl, force libuv to also build as static so its
+# symbols can be merged into the fat libpccl.a archive.
+if (PCCL_BUILD_STATIC_LIB)
+    set(LIBUV_BUILD_SHARED OFF CACHE BOOL "Build libuv as shared" FORCE)
+endif ()
+
 # add third party libraries
 add_subdirectory(third_party)
 
@@ -121,8 +163,6 @@ add_subdirectory(ccoip)
 add_subdirectory(ccoip_master)
 add_subdirectory(tinysockets)
 
-option(PCCL_BUILD_STATIC_LIB "Build PCCL as a static library" ON)
-
 if (PCCL_BUILD_STATIC_LIB)
     add_library(pccl STATIC src/pccl.cpp)
 else ()
@@ -137,17 +177,166 @@ if (PCCL_BUILD_CUDA_SUPPORT)
     target_compile_definitions(pccl PRIVATE PCCL_HAS_CUDA_SUPPORT)
 endif ()
 
-target_include_directories(pccl PUBLIC include)
+if (PCCL_BUILD_HIP_SUPPORT)
+    target_compile_definitions(pccl PRIVATE PCCL_HAS_HIP_SUPPORT)
+endif ()
+
+target_include_directories(pccl PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 target_include_directories(pccl PRIVATE internal)
 
-target_link_libraries(pccl PRIVATE ccoip_private)
-target_link_libraries(pccl PUBLIC ccoip_public)
-target_link_libraries(pccl PRIVATE pccl_log)
+target_link_libraries(pccl PRIVATE $<BUILD_INTERFACE:ccoip_private>)
+target_link_libraries(pccl PRIVATE $<BUILD_INTERFACE:ccoip_public>)
+target_link_libraries(pccl PRIVATE $<BUILD_INTERFACE:pccl_log>)
+# Expose the ccoip public headers through pccl's own include interface so
+# they are available both in the build tree and via the installed cmake target.
+target_include_directories(pccl PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ccoip/public_include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 
-if (NOT PCCL_BUILD_STATIC_LIB)
+# When pccl is a static library, consumers must link its runtime deps themselves
+# because archive files don't carry shared-library transitive requirements.
+# Use plain linker flags (not cmake target names) so the installed cmake
+# package config works without requiring consumers to call find_package(HIP).
+if (PCCL_BUILD_STATIC_LIB)
+    if (PCCL_BUILD_HIP_SUPPORT AND hip_FOUND)
+        # hip::amdhip64 only sets IMPORTED_LOCATION_RELWITHDEBINFO, not the
+        # generic IMPORTED_LOCATION.  Use find_library to reliably locate the
+        # shared library so we can emit a proper -L<dir> -lamdhip64 pair.
+        find_library(_amdhip64_lib NAMES amdhip64
+            HINTS "${HIP_PATH}/lib" /opt/rocm/lib /opt/rocm-7.2.4/lib
+            NO_DEFAULT_PATH)
+        if (_amdhip64_lib)
+            get_filename_component(_hip_lib_dir "${_amdhip64_lib}" DIRECTORY)
+            target_link_libraries(pccl INTERFACE "-L${_hip_lib_dir}" -lamdhip64)
+        else ()
+            target_link_libraries(pccl INTERFACE -lamdhip64)
+        endif ()
+    endif ()
+    if (PCCL_BUILD_CUDA_SUPPORT AND CUDAToolkit_FOUND)
+        target_link_libraries(pccl INTERFACE CUDA::cuda_driver)
+    endif ()
+        if (PCCL_BUILD_OPENMP_SUPPORT AND OpenMP_CXX_FOUND)
+            # Use the resolved library paths (not the cmake target name) so
+            # the exported cmake package works without requiring consumers to
+            # call find_package(OpenMP) themselves.
+            target_link_libraries(pccl INTERFACE ${OpenMP_CXX_LIBRARIES})
+        endif ()
     fix_macos_abspaths(pccl)
+endif ()
+
+# ---------------------------------------------------------------------------
+# Fat static library: merge all component archives into a single libpccl.a so
+# that external users can link with just -lpccl without needing to supply
+# every transitive dependency on the link line.
+# ---------------------------------------------------------------------------
+if (PCCL_BUILD_STATIC_LIB AND UNIX)
+    # Base set of component archives (platform-independent)
+    set(_pccl_fat_libs
+        $<TARGET_FILE:pccl_log>
+        $<TARGET_FILE:ccoip_internal>
+        $<TARGET_FILE:crc32_cpu>
+        $<TARGET_FILE:simplehash_cpu>
+        $<TARGET_FILE:tinysockets>
+        $<TARGET_FILE:tsp>
+        $<TARGET_FILE:threadpool>
+        $<TARGET_FILE:threadpark>
+        $<TARGET_FILE:piquant>
+        $<TARGET_FILE:uv_a>
+    )
+    if (IS_AMD64)
+        list(APPEND _pccl_fat_libs
+            $<TARGET_FILE:crc32_amd64_sse42>
+            $<TARGET_FILE:crc32_amd64_sse42_pcmul>
+        )
+    elseif (IS_ARM64)
+        list(APPEND _pccl_fat_libs $<TARGET_FILE:crc32_arm64>)
+    endif ()
+    if (PCCL_BUILD_CUDA_SUPPORT AND CUDAToolkit_FOUND)
+        list(APPEND _pccl_fat_libs $<TARGET_FILE:simplehash_cuda>)
+    endif ()
+
+    # Build the ar MRI script content at generation time so generator
+    # expressions (TARGET_FILE) are resolved to real paths.
+    set(_mri_addlibs "")
+    foreach(_f IN LISTS _pccl_fat_libs)
+        string(APPEND _mri_addlibs "ADDLIB ${_f}\n")
+    endforeach()
+
+    if (NOT APPLE)
+        # Linux: ar -M with an MRI script
+        set(_mri_file "${CMAKE_CURRENT_BINARY_DIR}/pccl_fat.mri")
+        file(GENERATE OUTPUT "${_mri_file}"
+            CONTENT "CREATE $<TARGET_FILE:pccl>\nADDLIB $<TARGET_FILE:pccl>\n${_mri_addlibs}SAVE\nEND\n")
+        add_custom_command(TARGET pccl POST_BUILD
+            COMMAND ${CMAKE_AR} -M < "${_mri_file}"
+            COMMENT "Merging component archives into fat libpccl.a"
+        )
+    else ()
+        # macOS: libtool -static
+        add_custom_command(TARGET pccl POST_BUILD
+            COMMAND libtool -static -o "$<TARGET_FILE:pccl>"
+                "$<TARGET_FILE:pccl>" ${_pccl_fat_libs}
+            COMMENT "Merging component archives into fat libpccl.a (macOS)"
+        )
+    endif ()
 endif ()
 
 if (PCCL_BUILD_TESTS)
     add_subdirectory(tests)
 endif ()
+
+# ---------------------------------------------------------------------------
+# Install rules, cmake package config, and pkg-config
+# ---------------------------------------------------------------------------
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS pccl
+    EXPORT pcclTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY ccoip/public_include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+# Generate and install cmake package config
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/pcclConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/pcclConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/pccl"
+)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/pcclConfig.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/pccl"
+)
+install(EXPORT pcclTargets
+    FILE pcclTargets.cmake
+    NAMESPACE pccl::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/pccl"
+)
+
+# Generate and install pkg-config file (for non-cmake consumers: cc main.c -lpccl $(pkg-config --libs pccl))
+set(_pccl_pc_libs "")
+if (PCCL_BUILD_HIP_SUPPORT AND hip_FOUND)
+    set(_pccl_pc_libs "${_pccl_pc_libs} -lamdhip64")
+    get_target_property(_hip_lib_dir hip::host LOCATION)
+    if (_hip_lib_dir)
+        get_filename_component(_hip_lib_dir "${_hip_lib_dir}" DIRECTORY)
+        set(_pccl_pc_libs "-L${_hip_lib_dir} ${_pccl_pc_libs}")
+    endif ()
+endif ()
+if (PCCL_BUILD_CUDA_SUPPORT AND CUDAToolkit_FOUND)
+    set(_pccl_pc_libs "${_pccl_pc_libs} -lcuda")
+endif ()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/pccl.pc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/pccl.pc"
+    @ONLY
+)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/pccl.pc"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+)

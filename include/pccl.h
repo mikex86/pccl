@@ -55,6 +55,7 @@ typedef enum pcclDataType_t {
 typedef enum pcclDeviceType_t {
     pcclDeviceCpu = 0,
     pcclDeviceCuda = 1,
+    pcclDeviceHip = 2,
 } pcclDeviceType_t;
 
 typedef enum pcclRedOp_t {
@@ -216,6 +217,10 @@ typedef struct pcclBuildInfo_t {
      * Whether this pccl build was compiled with CUDA support
      */
     bool has_cuda_support;
+    /**
+     * Whether this pccl build was compiled with HIP/ROCm support
+     */
+    bool has_hip_support;
 } pcclBuildInfo_t;
 
 #define PCCL_NULLABLE /* nothing */

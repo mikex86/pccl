@@ -26,6 +26,7 @@ namespace ccoip {
     enum ccoip_device_type_t {
         ccoipDeviceCpu = 0,
         ccoipDeviceCuda = 1,
+        ccoipDeviceHip = 2,
     };
     enum ccoip_hash_type_t {
         ccoipHashSimple = 0,

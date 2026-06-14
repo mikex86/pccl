@@ -5,6 +5,10 @@
 #include <pccl_log.hpp>
 #include "ccoip_types.hpp"
 
+#ifdef PCCL_HAS_HIP_SUPPORT
+#include <hip/hip_runtime.h>
+#endif
+
 #include <benchmark_runner.hpp>
 #include <guard_utils.hpp>
 #include <list>
@@ -349,6 +353,7 @@ bool ccoip::CCoIPClientHandler::syncSharedState(ccoip_shared_state_t &shared_sta
         }
     }
 #endif
+    // HIP device pointers are plain void* from hipMalloc — no runtime-to-driver conversion needed.
 
     // prepare shared state hashes
     std::vector<SharedStateHashEntry> shared_state_hashes{};
@@ -370,6 +375,14 @@ bool ccoip::CCoIPClientHandler::syncSharedState(ccoip_shared_state_t &shared_sta
                 return false;
 #else
                 hash = hash_utils::simplehash_cuda(entry.data_ptr, entry.data_size);
+                hash_type = ccoipHashSimple;
+#endif
+            } else if (entry.device_type == ccoipDeviceHip) {
+#ifndef PCCL_HAS_HIP_SUPPORT
+                LOG(BUG) << "PCCL is not built with HIP support. We shouldn't even have gotten so far without HIP "
+                return false;
+#else
+                hash = hash_utils::simplehash_hip(entry.data_ptr, entry.data_size);
                 hash_type = ccoipHashSimple;
 #endif
             } else {
@@ -521,6 +534,27 @@ bool ccoip::CCoIPClientHandler::syncSharedState(ccoip_shared_state_t &shared_sta
                             return false;
                         }
 #endif
+                    } else if (dst_entry.device_type == ccoipDeviceHip) {
+#ifndef PCCL_HAS_HIP_SUPPORT
+                        LOG(BUG) << "PCCL is not built with HIP support. We shouldn't even have gotten so far "
+                                    "without HIP support when referencing HIP tensors. This is a bug!";
+                        return false;
+#else
+                        std::unique_ptr<std::byte> dst_ptr(new std::byte[dst_entry.data_size]);
+                        std::span dst_span(dst_ptr.get(), dst_entry.data_size);
+                        if (req_socket.receiveRawData(dst_span, new_entry->size_bytes) != new_entry->size_bytes) {
+                            LOG(ERR) << "Failed receive all bytes expected for shared state entry during shared state "
+                                        "content transmission! Did peer disconnect unexpectedly?";
+                            return false;
+                        }
+                        if (hipMemcpy(dst_entry.data_ptr, dst_ptr.get(),
+                                      dst_entry.data_size, hipMemcpyHostToDevice) != hipSuccess) {
+                            LOG(FATAL)
+                                    << "Failed to copy host to HIP device memory while trying to write out shared state "
+                                       "transmission response content! Is shared state referenced memory still valid?";
+                            return false;
+                        }
+#endif
                     } else {
                         LOG(BUG) << "Unknown device type encountered while trying to write out shared state "
                                     "transmission response content. This should have been caught earlier and is a bug.";
@@ -569,10 +603,27 @@ bool ccoip::CCoIPClientHandler::syncSharedState(ccoip_shared_state_t &shared_sta
                                 }
                             }
                         }
+#ifdef PCCL_HAS_HIP_SUPPORT
+                            if (dst_entry.device_type == ccoipDeviceHip) {
+                                uint64_t actual_hash =
+                                        hash_utils::simplehash_hip(dst_entry.data_ptr, dst_entry.data_size);
+                                if (actual_hash != expected_hash) {
+                                    LOG(ERR) << "Shared state distributor transmitted incorrect shared state entry for "
+                                                "key "
+                                             << dst_entry.key << ": Expected hash " << expected_hash << " but got "
+                                             << actual_hash;
+                                    return false;
+                                }
+                            }
+#endif
 
                         if (expected_hash_type == ccoipHashCrc32) {
                             if (dst_entry.device_type == ccoipDeviceCuda) {
                                 LOG(FATAL) << "CRC32 is currently not supported on CUDA devices.";
+                                return false;
+                            }
+                            if (dst_entry.device_type == ccoipDeviceHip) {
+                                LOG(FATAL) << "CRC32 is currently not supported on HIP devices.";
                                 return false;
                             }
                             uint64_t actual_hash = hash_utils::CRC32(dst_entry.data_ptr, dst_entry.data_size);
@@ -1128,6 +1179,24 @@ end:
                 LOG(FATAL)
                         << "Failed to copy cuda device memory to host while serving shared state transmission request; "
                         << std::string(error_name) << ": " << std::string(error_string);
+                return;
+            }
+            if (!shared_state_socket.sendRawPacket(client_address, std::span(host_buffer.get(), entry.data_size))) {
+                LOG(ERR) << "Failed to send shared state data to client " << ccoip_sockaddr_to_str(client_address);
+            }
+#endif
+        } else if (entry.device_type == ccoipDeviceHip) {
+#ifndef PCCL_HAS_HIP_SUPPORT
+            if (entry.device_type == ccoipDeviceHip) {
+                LOG(BUG) << "PCCL is not built with HIP support. We shouldn't even have gotten so far without HIP "
+                            "support when referencing HIP tensors. This is a bug!";
+                return;
+            }
+#else
+            std::unique_ptr<std::byte[]> host_buffer(new std::byte[entry.data_size]);
+            if (hipMemcpy(host_buffer.get(), entry.data_ptr,
+                          entry.data_size, hipMemcpyDeviceToHost) != hipSuccess) {
+                LOG(FATAL) << "Failed to copy HIP device memory to host while serving shared state transmission request";
                 return;
             }
             if (!shared_state_socket.sendRawPacket(client_address, std::span(host_buffer.get(), entry.data_size))) {
