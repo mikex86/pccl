@@ -107,11 +107,6 @@ TEST(SimpleHashHipTest, TestDeterminism) {
 }
 
 int main(int argc, char **argv) {
-    hipError_t initErr = hipSetDevice(0);
-    if (initErr != hipSuccess) {
-        std::cerr << "hipSetDevice(0) failed: " << hipGetErrorString(initErr) << std::endl;
-        return 1;
-    }
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

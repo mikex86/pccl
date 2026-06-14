@@ -57,9 +57,18 @@ if (PCCL_BUILD_HIP_SUPPORT)
     target_link_libraries(ccoip_internal PUBLIC hip::host)
     target_compile_definitions(ccoip_internal PRIVATE PCCL_HAS_HIP_SUPPORT)
     target_include_directories(ccoip_internal PRIVATE $<TARGET_PROPERTY:hip::host,INTERFACE_INCLUDE_DIRECTORIES>)
-    add_library(simplehash_hip STATIC src/hip/simplehash_hip.hip)
+    # OBJECT library (not STATIC) ensures the .hip.o is linked directly into every
+    # consuming target without going through archive extraction.  This guarantees
+    # the .init_array / __hipRegisterFatBinary constructor runs and the GPU fat
+    # binary is registered before the first kernel launch.
+    add_library(simplehash_hip OBJECT src/hip/simplehash_hip.hip)
     set_target_properties(simplehash_hip PROPERTIES HIP_SEPARABLE_COMPILATION OFF)
     set_target_properties(simplehash_hip PROPERTIES HIP_ARCHITECTURES "${PCCL_HIP_ARCHITECTURES}")
+    # -O2 causes the compiler to inline OCKL device-library functions so the
+    # resulting code object is self-contained and does not expose ockl_hostcall /
+    # ockl_fprintf symbols.  This prevents libamdhip64 from invoking
+    # amd_comgr_do_action(ADD_PRECOMPILED_HEADERS) for gfx1201 at kernel launch.
+    target_compile_options(simplehash_hip PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-O2>)
     target_link_libraries(simplehash_hip PUBLIC hip::host)
     target_link_libraries(ccoip_internal PRIVATE simplehash_hip)
 endif ()
