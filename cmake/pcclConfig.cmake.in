@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if (@PCCL_BUILD_CUDA_SUPPORT@)
+    find_dependency(CUDAToolkit)
+endif ()
+
+include("${CMAKE_CURRENT_LIST_DIR}/pcclTargets.cmake")
