@@ -263,7 +263,8 @@ ROCm can be installed on Ubuntu using the AMD-provided apt repository. The follo
 # Add the ROCm apt repository
 sudo apt update && sudo apt install -y wget gnupg
 wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/rocm.gpg
-echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.4 $(lsb_release -cs) main" \
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/ $(lsb_release -cs) main" \
+7.2
     | sudo tee /etc/apt/sources.list.d/rocm.list
 
 # Install ROCm and HIP
